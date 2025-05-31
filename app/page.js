@@ -31,6 +31,10 @@ export default function Home() {
       const data = await response.json();
 
       if (!response.ok) {
+        // Si hay detalles adicionales, los guardamos también
+        if (data.details) {
+          setResult({ details: data.details });
+        }
         throw new Error(data.error || 'Error al procesar el video');
       }
 
@@ -125,9 +129,23 @@ ${result.transcription}`;
 
           {/* Error Message */}
           {error && (
-            <div className="mb-6 p-4 bg-red-500/20 border border-red-500/30 rounded-lg flex items-center gap-3">
-              <AlertCircle className="w-5 h-5 text-red-300 flex-shrink-0" />
-              <p className="text-red-100">{error}</p>
+            <div className="mb-6 p-4 bg-red-500/20 border border-red-500/30 rounded-lg">
+              <div className="flex items-center gap-3 mb-2">
+                <AlertCircle className="w-5 h-5 text-red-300 flex-shrink-0" />
+                <p className="text-red-100 font-semibold">Error</p>
+              </div>
+              <p className="text-red-100 mb-2">{error}</p>
+              {result?.details && (
+                <div className="text-red-200/80 text-sm">
+                  <p className="font-medium mb-1">Posibles causas:</p>
+                  <ul className="list-disc list-inside space-y-1">
+                    {Array.isArray(result.details) ? 
+                      result.details.map((detail, i) => <li key={i}>{detail}</li>) :
+                      <li>{result.details}</li>
+                    }
+                  </ul>
+                </div>
+              )}
             </div>
           )}
 
