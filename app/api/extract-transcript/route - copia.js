@@ -86,6 +86,7 @@ function cleanTranscriptionText(text) {
 
   return cleanedText;
 }
+// ========================================================================
 
 // Función para extraer video ID del URL de YouTube
 function extractVideoId(url) {
@@ -115,103 +116,17 @@ async function getVideoInfo(videoId) {
   }
 }
 
-// =================== DETECCIÓN INTELIGENTE DE IDIOMA ===================
-function getLanguagePriorities(videoInfo) {
-  // Detectar idioma del video
-  const videoLanguage = videoInfo?.snippet?.defaultLanguage || 
-                       videoInfo?.snippet?.defaultAudioLanguage || 
-                       null;
-  
-  const title = videoInfo?.snippet?.title?.toLowerCase() || '';
-  const description = videoInfo?.snippet?.description?.toLowerCase() || '';
-  
-  console.log('🔍 Idioma detectado del video:', videoLanguage);
-  console.log('📋 Título:', videoInfo?.snippet?.title?.substring(0, 50) + '...');
-  
-  // Heurística simple para detectar idioma si no está disponible en metadata
-  let detectedLanguage = videoLanguage;
-  
-  if (!detectedLanguage) {
-    // Patrones comunes en español
-    const spanishPatterns = [
-      /\b(el|la|los|las|un|una|que|de|en|y|a|por|para|con|su|del|al)\b/g,
-      /\b(como|muy|más|todo|todos|hace|hacer|tiene|está|esto|esa|ese)\b/g,
-      /[ñáéíóúü]/g
-    ];
-    
-    // Patrones comunes en inglés
-    const englishPatterns = [
-      /\b(the|and|of|to|in|for|is|on|that|by|this|with|from|they|we|at|be|or|an|are|as|at|be|been|for|from|has|he|in|is|it|its|of|on|that|the|to|was|will|with)\b/g,
-      /\b(how|what|when|where|why|who|can|could|would|should|will|get|make|take|go|come|see|know|think|say|want|use|work|try|ask|need|feel|become|leave|put|mean|keep|let|begin|seem|help|talk|turn|start|might|move|live|believe|hold|bring|happen|write|provide|sit|stand|lose|pay|meet|include|continue|set|learn|change|lead|understand|watch|follow|stop|create|speak|read|allow|add|spend|grow|open|walk|win|offer|remember|love|consider|appear|buy|wait|serve|die|send|expect|build|stay|fall|cut|reach|kill|remain)\b/g
-    ];
-    
-    const textToAnalyze = (title + ' ' + description).substring(0, 500);
-    
-    let spanishMatches = 0;
-    let englishMatches = 0;
-    
-    spanishPatterns.forEach(pattern => {
-      const matches = textToAnalyze.match(pattern);
-      if (matches) spanishMatches += matches.length;
-    });
-    
-    englishPatterns.forEach(pattern => {
-      const matches = textToAnalyze.match(pattern);
-      if (matches) englishMatches += matches.length;
-    });
-    
-    console.log('📊 Análisis heurístico - Español:', spanishMatches, 'Inglés:', englishMatches);
-    
-    if (spanishMatches > englishMatches && spanishMatches > 3) {
-      detectedLanguage = 'es';
-    } else if (englishMatches > spanishMatches && englishMatches > 3) {
-      detectedLanguage = 'en';
-    } else {
-      detectedLanguage = 'unknown';
-    }
-  }
-  
-  console.log('🎯 Idioma final detectado:', detectedLanguage);
-  
-  // Generar prioridades según el idioma detectado
-  let languagePriorities;
-  
-  switch (detectedLanguage) {
-    case 'es':
-      // Para videos en español: priorizar español, luego auto, luego inglés como último recurso
-      languagePriorities = ['es', 'auto', 'en'];
-      console.log('🇪🇸 Video en español detectado - Priorizando español');
-      break;
-      
-    case 'en':
-      // Para videos en inglés: priorizar inglés, luego auto, NO buscar español
-      languagePriorities = ['en', 'auto'];
-      console.log('🇺🇸 Video en inglés detectado - NO buscaré en español para mantener calidad');
-      break;
-      
-    default:
-      // Para idioma desconocido: auto primero, luego español e inglés
-      languagePriorities = ['auto', 'es', 'en'];
-      console.log('🌍 Idioma desconocido - Usando auto primero');
-      break;
-  }
-  
-  return {
-    detectedLanguage,
-    priorities: languagePriorities
-  };
-}
-
-// Método 1: youtube-captions-scraper con prioridades inteligentes
-async function getTranscriptWithCaptionsScraper(videoId, languageInfo) {
+// Método 1: youtube-captions-scraper (Más confiable)
+async function getTranscriptWithCaptionsScraper(videoId) {
   if (!getSubtitles) {
     throw new Error('youtube-captions-scraper no disponible');
   }
   
   console.log('🎯 Método 1: youtube-captions-scraper');
-  console.log('📋 Prioridades de idioma:', languageInfo.priorities);
   
-  for (const lang of languageInfo.priorities) {
+  const languages = ['es', 'en', 'auto'];
+  
+  for (const lang of languages) {
     try {
       console.log(`🔄 Probando idioma: ${lang}`);
       
@@ -223,15 +138,15 @@ async function getTranscriptWithCaptionsScraper(videoId, languageInfo) {
       if (captions && captions.length > 0) {
         console.log(`✅ Éxito con ${lang}, items: ${captions.length}`);
         
+        // ✨ APLICAR LIMPIEZA CENTRALIZADA
         const rawTranscription = captions.map(caption => caption.text).join(' ');
         const transcription = cleanTranscriptionText(rawTranscription);
         
         return {
           transcription,
-          method: `Subtítulos extraídos (${lang}) - Video ${languageInfo.detectedLanguage}`,
+          method: `Subtítulos extraídos (${lang})`,
           language: lang,
-          itemCount: captions.length,
-          videoLanguage: languageInfo.detectedLanguage
+          itemCount: captions.length
         };
       }
     } catch (error) {
@@ -243,14 +158,13 @@ async function getTranscriptWithCaptionsScraper(videoId, languageInfo) {
   throw new Error('No se encontraron subtítulos con youtube-captions-scraper');
 }
 
-// Método 2: youtube-transcript con prioridades inteligentes
-async function getTranscriptWithYoutubeTranscript(videoId, languageInfo) {
+// Método 2: youtube-transcript con headers mejorados
+async function getTranscriptWithYoutubeTranscript(videoId) {
   if (!YoutubeTranscript) {
     throw new Error('youtube-transcript no disponible');
   }
   
-  console.log('🎯 Método 2: youtube-transcript con prioridades inteligentes');
-  console.log('📋 Prioridades de idioma:', languageInfo.priorities);
+  console.log('🎯 Método 2: youtube-transcript mejorado');
   
   // Interceptar fetch para agregar headers
   const originalFetch = global.fetch;
@@ -277,8 +191,7 @@ async function getTranscriptWithYoutubeTranscript(videoId, languageInfo) {
   };
   
   try {
-    // Usar las prioridades dinámicas en lugar de lista fija
-    const languages = languageInfo.priorities.map(lang => lang === 'auto' ? null : lang);
+    const languages = ['es', 'en', null];
     
     for (const lang of languages) {
       try {
@@ -291,15 +204,15 @@ async function getTranscriptWithYoutubeTranscript(videoId, languageInfo) {
         if (transcript && transcript.length > 0) {
           console.log(`✅ Éxito con ${lang || 'auto'}, items: ${transcript.length}`);
           
+          // ✨ APLICAR LIMPIEZA CENTRALIZADA
           const rawTranscription = transcript.map(item => item.text).join(' ');
           const transcription = cleanTranscriptionText(rawTranscription);
           
           return {
             transcription,
-            method: `Transcripción automática (${lang || 'auto'}) - Video ${languageInfo.detectedLanguage}`,
+            method: `Transcripción automática (${lang || 'auto'})`,
             language: lang || 'auto',
-            itemCount: transcript.length,
-            videoLanguage: languageInfo.detectedLanguage
+            itemCount: transcript.length
           };
         }
       } catch (error) {
@@ -315,7 +228,7 @@ async function getTranscriptWithYoutubeTranscript(videoId, languageInfo) {
   }
 }
 
-// Método 3: Extracción manual del HTML de YouTube (mantiene lógica original)
+// Método 3: Extracción manual del HTML de YouTube
 async function getTranscriptFromHTML(videoId) {
   console.log('🎯 Método 3: Extracción manual de HTML');
   
@@ -370,6 +283,7 @@ async function getTranscriptFromHTML(videoId) {
               // Parsear XML y extraer texto
               const textMatches = captionXML.match(/<text[^>]*>(.*?)<\/text>/g);
               if (textMatches) {
+                // ✨ APLICAR LIMPIEZA CENTRALIZADA
                 const rawTranscription = textMatches
                   .map(match => match.replace(/<[^>]*>/g, '').trim())
                   .filter(text => text.length > 0)
@@ -435,14 +349,11 @@ export async function POST(request) {
     
     console.log('✅ Video encontrado:', videoInfo.snippet.title);
     
-    // 🆕 DETECTAR IDIOMA Y GENERAR PRIORIDADES INTELIGENTES
-    const languageInfo = getLanguagePriorities(videoInfo);
-    
-    // Intentar múltiples métodos con prioridades inteligentes
+    // Intentar múltiples métodos en orden de preferencia
     const methods = [
-      (videoId) => getTranscriptWithCaptionsScraper(videoId, languageInfo),
-      (videoId) => getTranscriptWithYoutubeTranscript(videoId, languageInfo),
-      getTranscriptFromHTML  // Este mantiene su lógica original
+      getTranscriptWithCaptionsScraper,
+      getTranscriptWithYoutubeTranscript,
+      getTranscriptFromHTML
     ];
     
     let result = null;
@@ -471,7 +382,6 @@ export async function POST(request) {
           title: videoInfo.snippet.title,
           channel: videoInfo.snippet.channelTitle,
           description: videoInfo.snippet.description?.substring(0, 200) + '...',
-          detectedLanguage: languageInfo.detectedLanguage
         },
         suggestions: [
           'Este video puede no tener subtítulos habilitados',
@@ -489,8 +399,7 @@ export async function POST(request) {
         title: videoInfo.snippet.title,
         channel: videoInfo.snippet.channelTitle,
         thumbnail: videoInfo.snippet.thumbnails?.medium?.url || videoInfo.snippet.thumbnails?.default?.url,
-        publishedAt: videoInfo.snippet.publishedAt,
-        detectedLanguage: languageInfo.detectedLanguage
+        publishedAt: videoInfo.snippet.publishedAt
       },
       transcription: result.transcription,
       method: result.method,
