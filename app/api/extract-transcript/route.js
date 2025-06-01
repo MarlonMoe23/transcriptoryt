@@ -1,30 +1,11 @@
 import { NextResponse } from 'next/server';
 
-// Importar ambas librerías para máxima compatibilidad
-let YoutubeTranscript;
-let getSubtitles;
-
-try {
-  // Importación dinámica para evitar errores si no están instaladas
-  YoutubeTranscript = (await import('youtube-transcript')).YoutubeTranscript;
-} catch (e) {
-  console.log('youtube-transcript no disponible');
-}
-
-try {
-  getSubtitles = (await import('youtube-captions-scraper')).getSubtitles;
-} catch (e) {
-  console.log('youtube-captions-scraper no disponible');
-}
-
-// Función para extraer video ID del URL de YouTube
 function extractVideoId(url) {
   const regExp = /^.*(youtu.be\/|v\/|u\/\w\/|embed\/|watch\?v=|&v=)([^#&?]*).*/;
   const match = url.match(regExp);
   return (match && match[2].length === 11) ? match[2] : null;
 }
 
-// Función para obtener información del video usando YouTube Data API
 async function getVideoInfo(videoId) {
   const apiKey = process.env.YOUTUBE_API_KEY;
   
@@ -45,63 +26,15 @@ async function getVideoInfo(videoId) {
   }
 }
 
-// Método 1: youtube-captions-scraper (Más confiable)
-async function getTranscriptWithCaptionsScraper(videoId) {
-  if (!getSubtitles) {
-    throw new Error('youtube-captions-scraper no disponible');
-  }
+// Función para diagnóstico completo de lo que está devolviendo YouTube
+async function diagnosticYouTubeResponse(videoId) {
+  console.log('🔍 === DIAGNÓSTICO COMPLETO DE YOUTUBE ===');
   
-  console.log('🎯 Método 1: youtube-captions-scraper');
-  
-  const languages = ['es', 'en', 'auto'];
-  
-  for (const lang of languages) {
-    try {
-      console.log(`🔄 Probando idioma: ${lang}`);
-      
-      const captions = await getSubtitles({
-        videoID: videoId,
-        lang: lang === 'auto' ? undefined : lang
-      });
-      
-      if (captions && captions.length > 0) {
-        console.log(`✅ Éxito con ${lang}, items: ${captions.length}`);
-        
-        const transcription = captions.map(caption => caption.text).join(' ');
-        
-        return {
-          transcription,
-          method: `Subtítulos extraídos (${lang})`,
-          language: lang,
-          itemCount: captions.length
-        };
-      }
-    } catch (error) {
-      console.log(`❌ Error con idioma ${lang}:`, error.message);
-      continue;
-    }
-  }
-  
-  throw new Error('No se encontraron subtítulos con youtube-captions-scraper');
-}
-
-// Método 2: youtube-transcript con headers mejorados
-async function getTranscriptWithYoutubeTranscript(videoId) {
-  if (!YoutubeTranscript) {
-    throw new Error('youtube-transcript no disponible');
-  }
-  
-  console.log('🎯 Método 2: youtube-transcript mejorado');
-  
-  // Interceptar fetch para agregar headers
-  const originalFetch = global.fetch;
-  
-  global.fetch = (url, options = {}) => {
-    return originalFetch(url, {
-      ...options,
+  try {
+    const response = await fetch(`https://www.youtube.com/watch?v=${videoId}`, {
       headers: {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
         'Accept-Language': 'en-US,en;q=0.9,es;q=0.8',
         'Accept-Encoding': 'gzip, deflate, br',
         'Cache-Control': 'no-cache',
@@ -112,228 +45,241 @@ async function getTranscriptWithYoutubeTranscript(videoId) {
         'Sec-Fetch-Mode': 'navigate',
         'Sec-Fetch-Site': 'none',
         'Sec-Fetch-User': '?1',
-        ...options.headers,
-      },
-    });
-  };
-  
-  try {
-    const languages = ['es', 'en', null];
-    
-    for (const lang of languages) {
-      try {
-        console.log(`🔄 Probando idioma: ${lang || 'auto'}`);
-        
-        const transcript = lang 
-          ? await YoutubeTranscript.fetchTranscript(videoId, { lang })
-          : await YoutubeTranscript.fetchTranscript(videoId);
-        
-        if (transcript && transcript.length > 0) {
-          console.log(`✅ Éxito con ${lang || 'auto'}, items: ${transcript.length}`);
-          
-          const transcription = transcript.map(item => item.text).join(' ');
-          
-          return {
-            transcription,
-            method: `Transcripción automática (${lang || 'auto'})`,
-            language: lang || 'auto',
-            itemCount: transcript.length
-          };
-        }
-      } catch (error) {
-        console.log(`❌ Error con idioma ${lang || 'auto'}:`, error.message);
-        continue;
-      }
-    }
-    
-    throw new Error('No se encontró transcripción con youtube-transcript');
-    
-  } finally {
-    global.fetch = originalFetch;
-  }
-}
-
-// Método 3: Extracción manual del HTML de YouTube
-async function getTranscriptFromHTML(videoId) {
-  console.log('🎯 Método 3: Extracción manual de HTML');
-  
-  try {
-    const response = await fetch(`https://www.youtube.com/watch?v=${videoId}`, {
-      headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-        'Accept-Language': 'en-US,en;q=0.9,es;q=0.8',
-        'Accept-Encoding': 'gzip, deflate, br',
-        'DNT': '1',
-        'Connection': 'keep-alive',
-        'Upgrade-Insecure-Requests': '1',
+        'sec-ch-ua': '"Not_A Brand";v="8", "Chromium";v="120", "Google Chrome";v="120"',
+        'sec-ch-ua-mobile': '?0',
+        'sec-ch-ua-platform': '"Windows"',
       }
     });
+    
+    console.log('📊 Status de respuesta:', response.status);
+    console.log('📋 Headers de respuesta:', Object.fromEntries(response.headers.entries()));
     
     if (!response.ok) {
-      throw new Error(`HTTP ${response.status}`);
+      return {
+        error: `HTTP ${response.status}`,
+        status: response.status,
+        headers: Object.fromEntries(response.headers.entries())
+      };
     }
     
     const html = await response.text();
-    console.log('📄 HTML obtenido:', html.length, 'caracteres');
+    console.log('📄 Longitud del HTML:', html.length);
     
-    // Buscar patrones de subtítulos en el HTML
-    const patterns = [
-      /"captionTracks":\s*(\[.*?\])/,
-      /"automaticCaptions":\s*{[^}]*"[^"]*":\s*(\[.*?\])/,
-      /"playerCaptionsTracklistRenderer".*?"captionTracks":\s*(\[.*?\])/
+    // Análisis detallado del contenido
+    const analysis = {
+      htmlLength: html.length,
+      containsPlayerResponse: html.includes('playerResponse'),
+      containsCaptionTracks: html.includes('captionTracks'),
+      containsAutomaticCaptions: html.includes('automaticCaptions'),
+      containsTimedText: html.includes('timedtext'),
+      containsPlayerCaptionsRenderer: html.includes('playerCaptionsTracklistRenderer'),
+      containsSubtitles: html.includes('subtitles'),
+      containsCaptions: html.includes('captions'),
+      
+      // Buscar patrones específicos
+      patterns: {}
+    };
+    
+    // Buscar todos los patrones posibles
+    const searchPatterns = [
+      { name: 'playerResponse', regex: /"playerResponse":\s*"([^"]*)"/ },
+      { name: 'captionTracks_direct', regex: /"captionTracks":\s*(\[.*?\])/ },
+      { name: 'automaticCaptions', regex: /"automaticCaptions":\s*{[^}]*"[^"]*":\s*(\[.*?\])/ },
+      { name: 'playerCaptionsRenderer', regex: /"playerCaptionsTracklistRenderer"[^}]*"captionTracks":\s*(\[.*?\])/ },
+      { name: 'timedtext_url', regex: /(https:\/\/www\.youtube\.com\/api\/timedtext[^"'\s]*)/ },
+      { name: 'ytInitialPlayerResponse', regex: /ytInitialPlayerResponse\s*=\s*({.*?});/ },
+      { name: 'ytInitialData', regex: /ytInitialData\s*=\s*({.*?});/ }
     ];
     
-    for (const pattern of patterns) {
-      const match = html.match(pattern);
+    for (const pattern of searchPatterns) {
+      const match = html.match(pattern.regex);
       if (match) {
-        try {
-          const captionTracks = JSON.parse(match[1]);
-          console.log('🎯 Encontrados caption tracks:', captionTracks.length);
-          
-          if (captionTracks.length > 0) {
-            // Seleccionar el mejor track (español > inglés > primero disponible)
-            let selectedTrack = captionTracks.find(track => 
-              track.languageCode === 'es' || track.name?.simpleText?.includes('Español')
-            ) || captionTracks.find(track => 
-              track.languageCode === 'en' || track.name?.simpleText?.includes('English')
-            ) || captionTracks[0];
-            
-            if (selectedTrack && selectedTrack.baseUrl) {
-              console.log('📥 Descargando subtítulos de:', selectedTrack.baseUrl);
-              
-              const captionResponse = await fetch(selectedTrack.baseUrl);
-              const captionXML = await captionResponse.text();
-              
-              // Parsear XML y extraer texto
-              const textMatches = captionXML.match(/<text[^>]*>(.*?)<\/text>/g);
-              if (textMatches) {
-                const transcription = textMatches
-                  .map(match => match.replace(/<[^>]*>/g, '').trim())
-                  .filter(text => text.length > 0)
-                  .join(' ');
-                
-                if (transcription.length > 0) {
-                  return {
-                    transcription,
-                    method: `Subtítulos manuales (${selectedTrack.languageCode || 'unknown'})`,
-                    language: selectedTrack.languageCode || 'unknown',
-                    itemCount: textMatches.length
-                  };
-                }
-              }
-            }
-          }
-        } catch (parseError) {
-          console.log('❌ Error parseando caption tracks:', parseError.message);
-          continue;
-        }
+        analysis.patterns[pattern.name] = {
+          found: true,
+          matchLength: match[0].length,
+          preview: match[0].substring(0, 200) + (match[0].length > 200 ? '...' : '')
+        };
+        console.log(`🎯 Patrón encontrado - ${pattern.name}:`, analysis.patterns[pattern.name]);
+      } else {
+        analysis.patterns[pattern.name] = { found: false };
+        console.log(`❌ Patrón NO encontrado - ${pattern.name}`);
       }
     }
     
-    throw new Error('No se encontraron subtítulos en el HTML');
+    // Buscar indicaciones de por qué no hay subtítulos
+    const errorIndicators = [
+      'transcript is disabled',
+      'captions are disabled',
+      'no captions available',
+      'subtitles unavailable',
+      'transcript unavailable'
+    ];
+    
+    analysis.errorIndicators = {};
+    for (const indicator of errorIndicators) {
+      const found = html.toLowerCase().includes(indicator.toLowerCase());
+      analysis.errorIndicators[indicator] = found;
+      if (found) {
+        console.log(`⚠️ Indicador de error encontrado: ${indicator}`);
+      }
+    }
+    
+    // Extraer una muestra del HTML para análisis
+    const htmlSample = html.substring(0, 5000);
+    analysis.htmlSample = htmlSample;
+    
+    return analysis;
     
   } catch (error) {
-    console.log('❌ Error en extracción manual:', error.message);
-    throw error;
+    console.log('❌ Error en diagnóstico:', error.message);
+    return {
+      error: error.message,
+      type: 'network_error'
+    };
   }
 }
 
+// Función para probar con diferentes videos conocidos
+async function testWithKnownVideos() {
+  console.log('🧪 === PROBANDO CON VIDEOS CONOCIDOS ===');
+  
+  const knownVideos = [
+    { id: 'dQw4w9WgXcQ', name: 'Rick Roll (muy popular)' },
+    { id: 'UF8uR6Z6KLc', name: 'Video tech popular' },
+    { id: 'jNQXAC9IVRw', name: 'Me at the zoo (primer video YT)' }
+  ];
+  
+  const results = {};
+  
+  for (const video of knownVideos) {
+    console.log(`🔄 Probando ${video.name} (${video.id})...`);
+    try {
+      const diagnosis = await diagnosticYouTubeResponse(video.id);
+      results[video.id] = {
+        name: video.name,
+        success: !diagnosis.error,
+        diagnosis: diagnosis
+      };
+      console.log(`✅ ${video.name}:`, diagnosis.htmlLength > 0 ? 'HTML obtenido' : 'Falló');
+    } catch (error) {
+      results[video.id] = {
+        name: video.name,
+        success: false,
+        error: error.message
+      };
+      console.log(`❌ ${video.name}:`, error.message);
+    }
+  }
+  
+  return results;
+}
+
 export async function POST(request) {
+  console.log('🚀 === DIAGNÓSTICO ULTIMATE INICIADO ===');
+  
   try {
     const { youtubeUrl } = await request.json();
     
     if (!youtubeUrl) {
-      return NextResponse.json(
-        { error: 'URL de YouTube requerida' },
-        { status: 400 }
-      );
+      return NextResponse.json({ error: 'URL requerida' }, { status: 400 });
     }
     
     const videoId = extractVideoId(youtubeUrl);
     if (!videoId) {
-      return NextResponse.json(
-        { error: 'URL de YouTube inválida' },
-        { status: 400 }
-      );
+      return NextResponse.json({ error: 'URL inválida' }, { status: 400 });
     }
     
-    console.log('🎬 Procesando video:', videoId);
+    console.log('🎬 Video ID objetivo:', videoId);
     
-    // Obtener información del video
-    const videoInfo = await getVideoInfo(videoId);
-    if (!videoInfo) {
-      return NextResponse.json(
-        { error: 'Video no encontrado o no es público' },
-        { status: 404 }
-      );
-    }
-    
-    console.log('✅ Video encontrado:', videoInfo.snippet.title);
-    
-    // Intentar múltiples métodos en orden de preferencia
-    const methods = [
-      getTranscriptWithCaptionsScraper,
-      getTranscriptWithYoutubeTranscript,
-      getTranscriptFromHTML
-    ];
-    
-    let result = null;
-    let lastError = null;
-    
-    for (const method of methods) {
-      try {
-        result = await method(videoId);
-        if (result && result.transcription) {
-          console.log('✅ Método exitoso:', result.method);
-          break;
-        }
-      } catch (error) {
-        console.log('❌ Método falló:', error.message);
-        lastError = error.message;
-        continue;
-      }
-    }
-    
-    if (!result || !result.transcription) {
+    // Paso 1: Verificar que el video existe
+    let videoInfo = null;
+    try {
+      videoInfo = await getVideoInfo(videoId);
+      console.log('✅ Video existe en YouTube API:', !!videoInfo);
+    } catch (error) {
+      console.log('❌ Error verificando video:', error.message);
       return NextResponse.json({
-        error: 'No se pudo extraer la transcripción con ningún método',
-        details: lastError,
-        videoInfo: {
-          title: videoInfo.snippet.title,
-          channel: videoInfo.snippet.channelTitle,
-          description: videoInfo.snippet.description?.substring(0, 200) + '...',
-        },
-        suggestions: [
-          'Este video puede no tener subtítulos habilitados',
-          'Prueba con un video de un canal verificado',
-          'Verifica que el video tenga el botón CC disponible en YouTube'
-        ]
-      }, { status: 404 });
+        error: 'Error verificando video',
+        details: error.message
+      }, { status: 500 });
     }
     
-    console.log('✅ Transcripción extraída:', result.transcription.length, 'caracteres');
+    // Paso 2: Diagnóstico completo del video objetivo
+    console.log('\n📊 === DIAGNÓSTICO DEL VIDEO OBJETIVO ===');
+    const targetDiagnosis = await diagnosticYouTubeResponse(videoId);
+    
+    // Paso 3: Probar con videos conocidos para comparar
+    console.log('\n🧪 === COMPARACIÓN CON VIDEOS CONOCIDOS ===');
+    const knownVideoTests = await testWithKnownVideos();
+    
+    // Paso 4: Información del entorno
+    const environmentInfo = {
+      vercel: !!process.env.VERCEL,
+      region: process.env.VERCEL_REGION || 'unknown',
+      nodeVersion: process.version,
+      platform: process.platform,
+      timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+      hasApiKey: !!process.env.YOUTUBE_API_KEY,
+      timestamp: new Date().toISOString()
+    };
+    
+    console.log('🌍 Información del entorno:', environmentInfo);
+    
+    // Paso 5: Análisis y recomendaciones
+    let recommendations = [];
+    let diagnosis = 'unknown';
+    
+    if (targetDiagnosis.error) {
+      diagnosis = 'youtube_blocked';
+      recommendations = [
+        'YouTube está bloqueando completamente las requests desde Vercel',
+        'Usar una API externa de transcripción sería la mejor opción',
+        'Considerar usar un proxy o servicio intermediario'
+      ];
+    } else if (targetDiagnosis.htmlLength < 100000) {
+      diagnosis = 'limited_html';
+      recommendations = [
+        'YouTube devuelve HTML limitado (sin datos de transcripción)',
+        'Detecta que viene de un servidor y limita el contenido',
+        'Usar youtube-dl o yt-dlp como servicio externo'
+      ];
+    } else if (!targetDiagnosis.containsPlayerResponse && !targetDiagnosis.containsCaptionTracks) {
+      diagnosis = 'no_transcript_data';
+      recommendations = [
+        'El HTML no contiene datos de transcripción',
+        'El video puede no tener subtítulos habilitados',
+        'Probar con videos que definitivamente tengan subtítulos'
+      ];
+    } else {
+      diagnosis = 'parsing_issue';
+      recommendations = [
+        'Los datos están en el HTML pero no se pueden extraer',
+        'Problema con los patrones de búsqueda',
+        'Necesita un parser más sofisticado'
+      ];
+    }
     
     return NextResponse.json({
-      success: true,
-      videoInfo: {
+      videoId: videoId,
+      videoInfo: videoInfo ? {
         title: videoInfo.snippet.title,
         channel: videoInfo.snippet.channelTitle,
-        thumbnail: videoInfo.snippet.thumbnails?.medium?.url || videoInfo.snippet.thumbnails?.default?.url,
         publishedAt: videoInfo.snippet.publishedAt
-      },
-      transcription: result.transcription,
-      method: result.method,
-      videoId,
-      language: result.language,
-      itemCount: result.itemCount
+      } : null,
+      diagnosis: diagnosis,
+      targetVideoAnalysis: targetDiagnosis,
+      knownVideoTests: knownVideoTests,
+      environment: environmentInfo,
+      recommendations: recommendations,
+      timestamp: new Date().toISOString()
     });
     
   } catch (error) {
-    console.error('🚨 Error general:', error);
+    console.error('🚨 Error en diagnóstico ultimate:', error);
     return NextResponse.json({
-      error: 'Error interno del servidor',
-      details: error.message
+      error: 'Error en diagnóstico',
+      details: error.message,
+      stack: error.stack?.split('\n').slice(0, 5)
     }, { status: 500 });
   }
 }
