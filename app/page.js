@@ -29,13 +29,26 @@ export default function Home() {
       });
 
       const data = await response.json();
+      
+      console.log('🔍 Respuesta completa del servidor:', data);
 
       if (!response.ok) {
         throw new Error(data.error || 'Error al procesar el video');
       }
 
+      // Debug: verificar qué contiene la respuesta
+      console.log('✅ Datos recibidos:', {
+        success: data.success,
+        hasTranscription: !!data.transcription,
+        transcriptionLength: data.transcription?.length || 0,
+        transcriptionPreview: data.transcription?.substring(0, 100) || 'Vacía',
+        method: data.method,
+        diagnosis: data.diagnosis || 'No disponible'
+      });
+
       setResult(data);
     } catch (err) {
+      console.error('❌ Error:', err);
       setError(err.message || 'Error de conexión con el servidor');
     } finally {
       setLoading(false);
@@ -43,11 +56,14 @@ export default function Home() {
   };
 
   const downloadTranscript = () => {
-    if (!result?.transcription) return;
+    if (!result?.transcription) {
+      alert('No hay transcripción para descargar');
+      return;
+    }
 
-    const content = `Transcripción de: ${result.videoInfo.title}
-Canal: ${result.videoInfo.channel}
-Método: ${result.method}
+    const content = `Transcripción de: ${result.videoInfo?.title || 'Video'}
+Canal: ${result.videoInfo?.channel || 'Desconocido'}
+Método: ${result.method || 'Desconocido'}
 Fecha: ${new Date().toLocaleDateString()}
 
 ---
@@ -58,7 +74,7 @@ ${result.transcription}`;
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `transcripcion-${result.videoId}.txt`;
+    a.download = `transcripcion-${result.videoId || 'video'}.txt`;
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
@@ -66,13 +82,17 @@ ${result.transcription}`;
   };
 
   const copyToClipboard = async () => {
-    if (!result?.transcription) return;
+    if (!result?.transcription) {
+      alert('No hay transcripción para copiar');
+      return;
+    }
     
     try {
       await navigator.clipboard.writeText(result.transcription);
       alert('Transcripción copiada al portapapeles');
     } catch (err) {
       console.error('Error al copiar al portapapeles:', err);
+      alert('Error al copiar al portapapeles');
     }
   };
 
@@ -150,35 +170,59 @@ ${result.transcription}`;
                 <CheckCircle className="w-5 h-5 text-green-300 flex-shrink-0" />
                 <div>
                   <p className="text-green-100 font-semibold">¡Transcripción extraída exitosamente!</p>
-                  <p className="text-green-200/80 text-sm">Método: {result.method}</p>
+                  <p className="text-green-200/80 text-sm">
+                    Método: {result.method || 'Desconocido'} 
+                    {result.language && ` | Idioma: ${result.language}`}
+                    {result.itemCount && ` | Items: ${result.itemCount}`}
+                  </p>
                 </div>
               </div>
 
+              {/* Debug Info (temporal) */}
+              {process.env.NODE_ENV === 'development' && (
+                <div className="p-4 bg-blue-500/20 border border-blue-500/30 rounded-lg">
+                  <p className="text-blue-100 font-semibold">🔍 Debug Info:</p>
+                  <pre className="text-blue-200/80 text-xs mt-2 overflow-auto">
+                    {JSON.stringify({
+                      hasTranscription: !!result.transcription,
+                      transcriptionLength: result.transcription?.length || 0,
+                      transcriptionPreview: result.transcription?.substring(0, 200) || 'Vacía'
+                    }, null, 2)}
+                  </pre>
+                </div>
+              )}
+
               {/* Video Info */}
-              <div className="bg-white/10 rounded-lg p-6 border border-white/20">
-                <div className="flex gap-4">
-                  <img 
-                    src={result.videoInfo.thumbnail} 
-                    alt="Thumbnail"
-                    className="w-32 h-24 object-cover rounded-lg"
-                  />
-                  <div className="flex-1">
-                    <h3 className="text-xl font-bold text-white mb-2">
-                      {result.videoInfo.title}
-                    </h3>
-                    <div className="flex items-center gap-4 text-white/80 text-sm">
-                      <div className="flex items-center gap-1">
-                        <User className="w-4 h-4" />
-                        {result.videoInfo.channel}
-                      </div>
-                      <div className="flex items-center gap-1">
-                        <Calendar className="w-4 h-4" />
-                        {new Date(result.videoInfo.publishedAt).toLocaleDateString()}
+              {result.videoInfo && (
+                <div className="bg-white/10 rounded-lg p-6 border border-white/20">
+                  <div className="flex gap-4">
+                    {result.videoInfo.thumbnail && (
+                      <img 
+                        src={result.videoInfo.thumbnail} 
+                        alt="Thumbnail"
+                        className="w-32 h-24 object-cover rounded-lg"
+                      />
+                    )}
+                    <div className="flex-1">
+                      <h3 className="text-xl font-bold text-white mb-2">
+                        {result.videoInfo.title || 'Título no disponible'}
+                      </h3>
+                      <div className="flex items-center gap-4 text-white/80 text-sm">
+                        <div className="flex items-center gap-1">
+                          <User className="w-4 h-4" />
+                          {result.videoInfo.channel || 'Canal desconocido'}
+                        </div>
+                        {result.videoInfo.publishedAt && (
+                          <div className="flex items-center gap-1">
+                            <Calendar className="w-4 h-4" />
+                            {new Date(result.videoInfo.publishedAt).toLocaleDateString()}
+                          </div>
+                        )}
                       </div>
                     </div>
                   </div>
                 </div>
-              </div>
+              )}
 
               {/* Transcription */}
               <div className="bg-white/10 rounded-lg border border-white/20">
@@ -190,13 +234,15 @@ ${result.transcription}`;
                   <div className="flex gap-2">
                     <button
                       onClick={copyToClipboard}
-                      className="px-3 py-1 bg-blue-500/20 text-blue-200 rounded hover:bg-blue-500/30 transition-colors text-sm"
+                      disabled={!result.transcription}
+                      className="px-3 py-1 bg-blue-500/20 text-blue-200 rounded hover:bg-blue-500/30 transition-colors text-sm disabled:opacity-50 disabled:cursor-not-allowed"
                     >
                       Copiar
                     </button>
                     <button
                       onClick={downloadTranscript}
-                      className="px-3 py-1 bg-green-500/20 text-green-200 rounded hover:bg-green-500/30 transition-colors text-sm flex items-center gap-1"
+                      disabled={!result.transcription}
+                      className="px-3 py-1 bg-green-500/20 text-green-200 rounded hover:bg-green-500/30 transition-colors text-sm flex items-center gap-1 disabled:opacity-50 disabled:cursor-not-allowed"
                     >
                       <Download className="w-4 h-4" />
                       Descargar
@@ -204,9 +250,30 @@ ${result.transcription}`;
                   </div>
                 </div>
                 <div className="p-4 max-h-96 overflow-y-auto">
-                  <p className="text-white/90 leading-relaxed whitespace-pre-wrap">
-                    {result.transcription}
-                  </p>
+                  {result.transcription && result.transcription.trim().length > 0 ? (
+                    <p className="text-white/90 leading-relaxed whitespace-pre-wrap">
+                      {result.transcription}
+                    </p>
+                  ) : (
+                    <div className="text-center py-8">
+                      <AlertCircle className="w-12 h-12 text-yellow-300 mx-auto mb-4" />
+                      <p className="text-yellow-100 font-semibold mb-2">Transcripción vacía</p>
+                      <p className="text-yellow-200/80 text-sm">
+                        El proceso fue exitoso pero no se extrajo contenido de texto.
+                        Esto puede suceder si el video no tiene subtítulos o transcripción disponible.
+                      </p>
+                      {result.recommendations && (
+                        <div className="mt-4 text-left">
+                          <p className="text-yellow-100 font-semibold mb-2">Sugerencias:</p>
+                          <ul className="text-yellow-200/80 text-sm space-y-1">
+                            {result.recommendations.map((rec, index) => (
+                              <li key={index}>• {rec}</li>
+                            ))}
+                          </ul>
+                        </div>
+                      )}
+                    </div>
+                  )}
                 </div>
               </div>
             </div>
@@ -221,6 +288,7 @@ ${result.transcription}`;
             <p>• La app intentará extraer subtítulos oficiales primero, luego transcripción automática</p>
             <p>• Funciona con videos en español e inglés principalmente</p>
             <p>• Puedes copiar o descargar la transcripción como archivo de texto</p>
+            <p>• Si aparece "Transcripción vacía", el video puede no tener subtítulos habilitados</p>
           </div>
         </div>
       </div>
