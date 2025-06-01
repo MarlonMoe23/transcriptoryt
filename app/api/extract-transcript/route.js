@@ -1,67 +1,92 @@
 import { NextResponse } from 'next/server';
-import { YoutubeTranscript } from 'youtube-transcript';
 
-// Function to decode HTML entities
-function decodeHTMLEntities(text) {
-  const entities = {
+// Importar ambas librerías para máxima compatibilidad
+let YoutubeTranscript;
+let getSubtitles;
+
+try {
+  // Importación dinámica para evitar errores si no están instaladas
+  YoutubeTranscript = (await import('youtube-transcript')).YoutubeTranscript;
+} catch (e) {
+  console.log('youtube-transcript no disponible');
+}
+
+try {
+  getSubtitles = (await import('youtube-captions-scraper')).getSubtitles;
+} catch (e) {
+  console.log('youtube-captions-scraper no disponible');
+}
+
+// =================== FUNCIÓN DE LIMPIEZA CENTRALIZADA ===================
+function cleanTranscriptionText(text) {
+  if (!text || typeof text !== 'string') {
+    return '';
+  }
+
+  let cleanedText = text;
+
+  // 1. Decodificar entidades HTML comunes
+  const htmlEntities = {
     '&amp;': '&',
     '&lt;': '<',
     '&gt;': '>',
     '&quot;': '"',
-    '&#39;': "'",
     '&apos;': "'",
+    '&#39;': "'",
+    '&amp;#39;': "'",
     '&#x27;': "'",
+    '&amp;#x27;': "'",
     '&#x2F;': '/',
-    '&#x60;': '`',
-    '&#x3D;': '=',
+    '&amp;#x2F;': '/',
+    '&#x5C;': '\\',
+    '&amp;#x5C;': '\\',
     '&nbsp;': ' ',
     '&hellip;': '...',
     '&mdash;': '—',
     '&ndash;': '–',
-    '&ldquo;': '"',
+    '&rsquo;': "'",
+    '&lsquo;': "'",
     '&rdquo;': '"',
-    '&lsquo;': ''',
-    '&rsquo;': ''',
+    '&ldquo;': '"'
   };
 
-  // First decode common named entities
-  let decoded = text;
-  for (const [entity, char] of Object.entries(entities)) {
-    decoded = decoded.replace(new RegExp(entity, 'gi'), char);
-  }
+  // Aplicar reemplazos de entidades HTML
+  Object.entries(htmlEntities).forEach(([entity, replacement]) => {
+    const regex = new RegExp(entity, 'gi');
+    cleanedText = cleanedText.replace(regex, replacement);
+  });
 
-  // Then decode numeric entities like &#39; or &#x27;
-  decoded = decoded.replace(/&#(\d+);/g, (match, dec) => {
+  // 2. Decodificar entidades numéricas HTML (&#123; o &#x1F;)
+  cleanedText = cleanedText.replace(/&#(\d+);/g, (match, dec) => {
     return String.fromCharCode(dec);
   });
   
-  decoded = decoded.replace(/&#x([0-9a-f]+);/gi, (match, hex) => {
+  cleanedText = cleanedText.replace(/&#x([0-9A-Fa-f]+);/g, (match, hex) => {
     return String.fromCharCode(parseInt(hex, 16));
   });
 
-  return decoded;
-}
+  // 3. Remover tags HTML restantes
+  cleanedText = cleanedText.replace(/<[^>]*>/g, '');
 
-// Function to clean and format transcript text
-function cleanTranscriptText(transcriptArray) {
-  if (!transcriptArray || !Array.isArray(transcriptArray)) {
-    return '';
-  }
+  // 4. Normalizar espacios en blanco
+  cleanedText = cleanedText
+    .replace(/\s+/g, ' ')
+    .replace(/\n\s*\n/g, '\n')
+    .trim();
 
-  // Join all text segments
-  let text = transcriptArray.map(item => item.text || '').join(' ');
-  
-  // Decode HTML entities
-  text = decodeHTMLEntities(text);
-  
-  // Clean up extra whitespace
-  text = text.replace(/\s+/g, ' ').trim();
-  
-  // Optional: Add some basic punctuation improvements
-  text = text.replace(/\s+([,.!?])/g, '$1'); // Remove space before punctuation
-  
-  return text;
+  // 5. Limpiar caracteres de control problemáticos
+  cleanedText = cleanedText.replace(/[\u0000-\u001F\u007F-\u009F]/g, '');
+
+  // 6. Normalizar puntuación duplicada
+  cleanedText = cleanedText
+    .replace(/\.{3,}/g, '...')
+    .replace(/\?{2,}/g, '?')
+    .replace(/!{2,}/g, '!')
+    .replace(/,{2,}/g, ',');
+
+  return cleanedText;
 }
+// ========================================================================
 
 // Función para extraer video ID del URL de YouTube
 function extractVideoId(url) {
@@ -91,47 +116,204 @@ async function getVideoInfo(videoId) {
   }
 }
 
-// Función para obtener subtítulos usando YouTube Data API
-async function getYouTubeSubtitles(videoId) {
-  const apiKey = process.env.YOUTUBE_API_KEY;
+// Método 1: youtube-captions-scraper (Más confiable)
+async function getTranscriptWithCaptionsScraper(videoId) {
+  if (!getSubtitles) {
+    throw new Error('youtube-captions-scraper no disponible');
+  }
+  
+  console.log('🎯 Método 1: youtube-captions-scraper');
+  
+  const languages = ['es', 'en', 'auto'];
+  
+  for (const lang of languages) {
+    try {
+      console.log(`🔄 Probando idioma: ${lang}`);
+      
+      const captions = await getSubtitles({
+        videoID: videoId,
+        lang: lang === 'auto' ? undefined : lang
+      });
+      
+      if (captions && captions.length > 0) {
+        console.log(`✅ Éxito con ${lang}, items: ${captions.length}`);
+        
+        // ✨ APLICAR LIMPIEZA CENTRALIZADA
+        const rawTranscription = captions.map(caption => caption.text).join(' ');
+        const transcription = cleanTranscriptionText(rawTranscription);
+        
+        return {
+          transcription,
+          method: `Subtítulos extraídos (${lang})`,
+          language: lang,
+          itemCount: captions.length
+        };
+      }
+    } catch (error) {
+      console.log(`❌ Error con idioma ${lang}:`, error.message);
+      continue;
+    }
+  }
+  
+  throw new Error('No se encontraron subtítulos con youtube-captions-scraper');
+}
+
+// Método 2: youtube-transcript con headers mejorados
+async function getTranscriptWithYoutubeTranscript(videoId) {
+  if (!YoutubeTranscript) {
+    throw new Error('youtube-transcript no disponible');
+  }
+  
+  console.log('🎯 Método 2: youtube-transcript mejorado');
+  
+  // Interceptar fetch para agregar headers
+  const originalFetch = global.fetch;
+  
+  global.fetch = (url, options = {}) => {
+    return originalFetch(url, {
+      ...options,
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
+        'Accept-Language': 'en-US,en;q=0.9,es;q=0.8',
+        'Accept-Encoding': 'gzip, deflate, br',
+        'Cache-Control': 'no-cache',
+        'DNT': '1',
+        'Connection': 'keep-alive',
+        'Upgrade-Insecure-Requests': '1',
+        'Sec-Fetch-Dest': 'document',
+        'Sec-Fetch-Mode': 'navigate',
+        'Sec-Fetch-Site': 'none',
+        'Sec-Fetch-User': '?1',
+        ...options.headers,
+      },
+    });
+  };
   
   try {
-    const response = await fetch(
-      `https://www.googleapis.com/youtube/v3/captions?videoId=${videoId}&key=${apiKey}&part=snippet`
-    );
+    const languages = ['es', 'en', null];
+    
+    for (const lang of languages) {
+      try {
+        console.log(`🔄 Probando idioma: ${lang || 'auto'}`);
+        
+        const transcript = lang 
+          ? await YoutubeTranscript.fetchTranscript(videoId, { lang })
+          : await YoutubeTranscript.fetchTranscript(videoId);
+        
+        if (transcript && transcript.length > 0) {
+          console.log(`✅ Éxito con ${lang || 'auto'}, items: ${transcript.length}`);
+          
+          // ✨ APLICAR LIMPIEZA CENTRALIZADA
+          const rawTranscription = transcript.map(item => item.text).join(' ');
+          const transcription = cleanTranscriptionText(rawTranscription);
+          
+          return {
+            transcription,
+            method: `Transcripción automática (${lang || 'auto'})`,
+            language: lang || 'auto',
+            itemCount: transcript.length
+          };
+        }
+      } catch (error) {
+        console.log(`❌ Error con idioma ${lang || 'auto'}:`, error.message);
+        continue;
+      }
+    }
+    
+    throw new Error('No se encontró transcripción con youtube-transcript');
+    
+  } finally {
+    global.fetch = originalFetch;
+  }
+}
+
+// Método 3: Extracción manual del HTML de YouTube
+async function getTranscriptFromHTML(videoId) {
+  console.log('🎯 Método 3: Extracción manual de HTML');
+  
+  try {
+    const response = await fetch(`https://www.youtube.com/watch?v=${videoId}`, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+        'Accept-Language': 'en-US,en;q=0.9,es;q=0.8',
+        'Accept-Encoding': 'gzip, deflate, br',
+        'DNT': '1',
+        'Connection': 'keep-alive',
+        'Upgrade-Insecure-Requests': '1',
+      }
+    });
     
     if (!response.ok) {
-      return null;
+      throw new Error(`HTTP ${response.status}`);
     }
     
-    const data = await response.json();
+    const html = await response.text();
+    console.log('📄 HTML obtenido:', html.length, 'caracteres');
     
-    if (data.items && data.items.length > 0) {
-      // Buscar subtítulos en español primero, luego en inglés
-      let captionTrack = data.items.find(item => 
-        item.snippet.language === 'es' || item.snippet.language === 'es-ES'
-      );
-      
-      if (!captionTrack) {
-        captionTrack = data.items.find(item => 
-          item.snippet.language === 'en' || item.snippet.language === 'en-US'
-        );
+    // Buscar patrones de subtítulos en el HTML
+    const patterns = [
+      /"captionTracks":\s*(\[.*?\])/,
+      /"automaticCaptions":\s*{[^}]*"[^"]*":\s*(\[.*?\])/,
+      /"playerCaptionsTracklistRenderer".*?"captionTracks":\s*(\[.*?\])/
+    ];
+    
+    for (const pattern of patterns) {
+      const match = html.match(pattern);
+      if (match) {
+        try {
+          const captionTracks = JSON.parse(match[1]);
+          console.log('🎯 Encontrados caption tracks:', captionTracks.length);
+          
+          if (captionTracks.length > 0) {
+            // Seleccionar el mejor track (español > inglés > primero disponible)
+            let selectedTrack = captionTracks.find(track => 
+              track.languageCode === 'es' || track.name?.simpleText?.includes('Español')
+            ) || captionTracks.find(track => 
+              track.languageCode === 'en' || track.name?.simpleText?.includes('English')
+            ) || captionTracks[0];
+            
+            if (selectedTrack && selectedTrack.baseUrl) {
+              console.log('📥 Descargando subtítulos de:', selectedTrack.baseUrl);
+              
+              const captionResponse = await fetch(selectedTrack.baseUrl);
+              const captionXML = await captionResponse.text();
+              
+              // Parsear XML y extraer texto
+              const textMatches = captionXML.match(/<text[^>]*>(.*?)<\/text>/g);
+              if (textMatches) {
+                // ✨ APLICAR LIMPIEZA CENTRALIZADA
+                const rawTranscription = textMatches
+                  .map(match => match.replace(/<[^>]*>/g, '').trim())
+                  .filter(text => text.length > 0)
+                  .join(' ');
+                
+                const transcription = cleanTranscriptionText(rawTranscription);
+                
+                if (transcription.length > 0) {
+                  return {
+                    transcription,
+                    method: `Subtítulos manuales (${selectedTrack.languageCode || 'unknown'})`,
+                    language: selectedTrack.languageCode || 'unknown',
+                    itemCount: textMatches.length
+                  };
+                }
+              }
+            }
+          }
+        } catch (parseError) {
+          console.log('❌ Error parseando caption tracks:', parseError.message);
+          continue;
+        }
       }
-      
-      if (!captionTrack) {
-        captionTrack = data.items[0];
-      }
-      
-      return {
-        language: captionTrack.snippet.language,
-        trackKind: captionTrack.snippet.trackKind
-      };
     }
     
-    return null;
+    throw new Error('No se encontraron subtítulos en el HTML');
+    
   } catch (error) {
-    console.error('Error obteniendo subtítulos oficiales:', error);
-    return null;
+    console.log('❌ Error en extracción manual:', error.message);
+    throw error;
   }
 }
 
@@ -146,7 +328,6 @@ export async function POST(request) {
       );
     }
     
-    // Extraer video ID
     const videoId = extractVideoId(youtubeUrl);
     if (!videoId) {
       return NextResponse.json(
@@ -154,6 +335,8 @@ export async function POST(request) {
         { status: 400 }
       );
     }
+    
+    console.log('🎬 Procesando video:', videoId);
     
     // Obtener información del video
     const videoInfo = await getVideoInfo(videoId);
@@ -164,61 +347,51 @@ export async function POST(request) {
       );
     }
     
-    let transcription = null;
-    let method = '';
-    let rawTranscriptLength = 0;
+    console.log('✅ Video encontrado:', videoInfo.snippet.title);
     
-    // Verificar si hay subtítulos oficiales disponibles
-    const officialSubtitles = await getYouTubeSubtitles(videoId);
+    // Intentar múltiples métodos en orden de preferencia
+    const methods = [
+      getTranscriptWithCaptionsScraper,
+      getTranscriptWithYoutubeTranscript,
+      getTranscriptFromHTML
+    ];
     
-    // Intentar obtener transcripción usando youtube-transcript
-    try {
-      // Primero intentar en español
-      let transcript = null;
-      
+    let result = null;
+    let lastError = null;
+    
+    for (const method of methods) {
       try {
-        transcript = await YoutubeTranscript.fetchTranscript(videoId, {
-          lang: 'es'
-        });
-        method = 'Transcripción automática (español)';
-      } catch (esError) {
-        // Si no hay en español, intentar en inglés
-        try {
-          transcript = await YoutubeTranscript.fetchTranscript(videoId, {
-            lang: 'en'
-          });
-          method = 'Transcripción automática (inglés)';
-        } catch (enError) {
-          // Intentar sin especificar idioma
-          transcript = await YoutubeTranscript.fetchTranscript(videoId);
-          method = 'Transcripción automática';
+        result = await method(videoId);
+        if (result && result.transcription) {
+          console.log('✅ Método exitoso:', result.method);
+          console.log('🧹 Longitud de transcripción limpia:', result.transcription.length, 'caracteres');
+          break;
         }
+      } catch (error) {
+        console.log('❌ Método falló:', error.message);
+        lastError = error.message;
+        continue;
       }
-      
-      if (transcript && transcript.length > 0) {
-        rawTranscriptLength = transcript.length;
-        // Use the new cleaning function
-        transcription = cleanTranscriptText(transcript);
-        
-        // Si hay subtítulos oficiales, actualizar el método
-        if (officialSubtitles) {
-          method = `${officialSubtitles.trackKind === 'standard' ? 'Subtítulos oficiales' : 'Subtítulos automáticos'} (${officialSubtitles.language})`;
-        }
-      }
-    } catch (transcriptError) {
-      console.error('Error obteniendo transcripción:', transcriptError);
     }
     
-    if (!transcription) {
+    if (!result || !result.transcription) {
       return NextResponse.json({
-        error: 'No se encontró transcripción o subtítulos para este video',
+        error: 'No se pudo extraer la transcripción con ningún método',
+        details: lastError,
         videoInfo: {
           title: videoInfo.snippet.title,
           channel: videoInfo.snippet.channelTitle,
-          description: videoInfo.snippet.description?.substring(0, 200) + '...'
-        }
+          description: videoInfo.snippet.description?.substring(0, 200) + '...',
+        },
+        suggestions: [
+          'Este video puede no tener subtítulos habilitados',
+          'Prueba con un video de un canal verificado',
+          'Verifica que el video tenga el botón CC disponible en YouTube'
+        ]
       }, { status: 404 });
     }
+    
+    console.log('✅ Transcripción extraída y limpiada:', result.transcription.length, 'caracteres');
     
     return NextResponse.json({
       success: true,
@@ -228,19 +401,15 @@ export async function POST(request) {
         thumbnail: videoInfo.snippet.thumbnails?.medium?.url || videoInfo.snippet.thumbnails?.default?.url,
         publishedAt: videoInfo.snippet.publishedAt
       },
-      transcription,
-      method,
+      transcription: result.transcription,
+      method: result.method,
       videoId,
-      // Debug info
-      debug: {
-        rawSegments: rawTranscriptLength,
-        cleanedLength: transcription.length,
-        hasDecoding: transcription !== transcript?.map(item => item.text).join(' ')
-      }
+      language: result.language,
+      itemCount: result.itemCount
     });
     
   } catch (error) {
-    console.error('Error en API:', error);
+    console.error('🚨 Error general:', error);
     return NextResponse.json({
       error: 'Error interno del servidor',
       details: error.message
